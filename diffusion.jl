@@ -5,7 +5,7 @@ using CairoMakie
 # using GLMakie
 using Optim
 
-make_figure = true
+make_figure = false
 # if make_figure
 #     GLMakie.activate!()
 # end
@@ -74,7 +74,7 @@ if make_figure
     display(f)
     f
 end
-save("single_cell_id.pdf", f)
+# save("single_cell_id.pdf", f)
 
 #%%
 
