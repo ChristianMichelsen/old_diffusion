@@ -53,6 +53,17 @@ function df2dist(df::DataFrame)
 end
 
 
+function get_df_Δ(df::DataFrame)
+    gd = groupby(df, [:cell, :id], sort = false)
+
+    Δr = reduce(vcat, [group2dist(g) for g in gd])
+    idx = reduce(vcat, [fill(i, nrow(g)-1) for (i,g) in enumerate(gd)])
+    id = reduce(vcat, [g[2:end, :id] for g in gd])
+    cell = reduce(vcat, [g[2:end, :cell] for g in gd])
+    return DataFrame((; Δr, idx, id, cell))
+end
+
+
 #%%
 
 function get_df_rows(dfs)
@@ -66,6 +77,29 @@ end
 function get_df_by_cell_id(df, cell, id)
     df = subset(dfs, :cell => ByRow(==(cell)), :id => ByRow(==(id)))
     return df
+end
+
+
+
+function get_df_Δ_long_runs(dfs::DataFrame, df_Δ::DataFrame, min_L::Int=10)
+
+    df_by_group = get_df_rows(dfs);
+    df_long_runs = df_by_group[df_by_group.L.>min_L, :];
+
+    df_Δ_long_runs = vcat(
+        [
+            get_df_by_cell_id(df_Δ, cell, id) for
+            (cell, id) in zip(df_long_runs.cell, df_long_runs.id)
+        ]...,
+    )
+
+    return get_df_Δ(df_Δ_long_runs)
+end
+
+
+function get_df_Δ_long_runs(dfs::DataFrame, min_L::Int=10)
+    df_Δ = get_df_Δ(dfs)
+    return get_df_Δ_long_runs(dfs, df_Δ, min_L)
 end
 
 

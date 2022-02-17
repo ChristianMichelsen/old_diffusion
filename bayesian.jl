@@ -20,7 +20,9 @@ type = "WT"
 
 input_dir = "../RealCleandFinalData/$(input_dirs[type])"
 dfs = get_dfs(input_dir)
-Δr = df2dist(dfs)
+# df_Δ = get_df_Δ(dfs)
+df_Δ = get_df_Δ_long_runs(dfs)
+
 
 include("bayesian_utils.jl")
 
