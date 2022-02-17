@@ -8,9 +8,9 @@ end
 
 
 
-function get_chains(model, N_samples, N_threads, model_name; forced = false)
+function get_chains(model, N_samples, N_threads, model_name, type; forced = false)
 
-    filename = "chains/$(model_name)__$(N_samples)__samples__$(N_threads)__threads.h5"
+    filename = "chains/$(type)__$(model_name)__$(N_samples)__samples__$(N_threads)__threads.h5"
 
     if isfile(filename) && !forced
         chain = h5open(filename, "r") do f

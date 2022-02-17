@@ -8,6 +8,10 @@ using NLSolversBase
 
 const TAU = 0.02
 
+input_dirs = Dict(
+    "WT" => "Sir3-Halo-WT_Single_Molecules_Data_Set_04_Judith_Cleaned",
+    "Sir2DSir4D" => "Sir3-Halo-Sir2DSir4D_Judith_Cleaned",
+)
 
 function get_files(input_dir)
     return sort(
