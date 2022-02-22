@@ -7,23 +7,47 @@ function D2σ²(D)
 end
 
 
+function get_unique_name(
+    N_samples::Int,
+    model_name::String,
+    type::String,
+    N_threads::Int = 1,
+)
+    return "$(type)__$(model_name)__$(N_samples)__samples__$(N_threads)__threads"
+end
 
-function get_chains(model, N_samples, N_threads, model_name, type; forced = false)
 
-    filename = "chains/$(type)__$(model_name)__$(N_samples)__samples__$(N_threads)__threads.h5"
+function get_chains(
+    model::AbstractMCMC.AbstractModel,
+    alg::Turing.Inference.InferenceAlgorithm,
+    N_samples::Int,
+    model_name::String,
+    N_threads::Int = 1;
+    forced::Bool = false,
+)
+
+    filename = "chains/$model_name.h5"
 
     if isfile(filename) && !forced
+        println("Loading $filename")
         chain = h5open(filename, "r") do f
             read(f, Chains)
         end
-        return chain
+        return sort(chain)
 
     else
-
+        println("Running Bayesian Analysis, please wait.")
+        Random.seed!(1)
+        logger = Logging.SimpleLogger(Logging.Error)
         chains = Logging.with_logger(logger) do
-            sample(model, NUTS(0.65), MCMCThreads(), N_samples, N_threads)
+            if N_threads == 1
+                sample(model, alg, N_samples)
+            else
+                sample(model, alg, MCMCThreads(), N_samples, N_threads)
+            end
         end
 
+        println("Saving $filename")
         h5open(filename, "w") do f
             write(f, chains)
         end
@@ -33,6 +57,20 @@ function get_chains(model, N_samples, N_threads, model_name, type; forced = fals
     end
 
 end
+
+function get_chains(
+    model::AbstractMCMC.AbstractModel,
+    N_samples::Int,
+    model_name::String,
+    N_threads::Int = 1;
+    forced::Bool = false,
+)
+    return get_chains(model, NUTS(0.65), N_samples, model_name, N_threads; forced = forced)
+end
+
+
+# function get_chains(model::DynamicPPL.Model, N_samples, N_threads, model_name, type; forced = false)
+# end
 
 
 
@@ -119,18 +157,17 @@ function model_comparison(llhs, names::Vector{String})
     elpds = Float64[]
     se_elpds = Float64[]
     loo_is = Vector[]
+    lppds = Float64[]
     for (llh, name) in zip(llhs, names)
         elpd_loo, se_elpd_loo, loo_i = PSIS(llh)
         push!(elpds, elpd_loo)
         push!(se_elpds, se_elpd_loo)
         push!(loo_is, loo_i)
+        lppd = compute_lppd(llh)
+        push!(lppds, lppd)
     end
 
     ordered = sortperm(elpds, rev = true)
-
-    names[ordered]
-    elpds[ordered]
-    se_elpds[ordered]
 
     Δelpds = Float64[]
     Δse_elpds = Float64[]
@@ -144,6 +181,7 @@ function model_comparison(llhs, names::Vector{String})
 
     df_comparison = DataFrame(
         name = names[ordered],
+        lppd = lppds[ordered],
         elpd = elpds[ordered],
         se_elpd = se_elpds[ordered],
         Δelpd = Δelpds,
@@ -183,7 +221,6 @@ function plot_model_comparison(df_comparison)
         direction = :x,
     ) # same low and high error
 
-    scatter!(ax, df_comparison.elpd, ys, markersize = 10, color = :black)
 
     vlines!(
         ax,
@@ -194,6 +231,10 @@ function plot_model_comparison(df_comparison)
     )
 
 
+    scatter!(ax, df_comparison.elpd, ys, markersize = 15, color = :black, marker = :circle)
+    if "lppd" in names(df_comparison)
+        scatter!(ax, df_comparison.lppd, ys, markersize = 15, color = :black, marker = :x)
+    end
 
     mask_Δ = 2:size(df_comparison, 1)
     errorbars!(
@@ -215,6 +256,18 @@ function plot_model_comparison(df_comparison)
         color = :grey,
     )
 
+    for i in mask_Δ
+        z = round(df_comparison[i, :z], digits = 2)
+        x = df_comparison[i, :elpd]
+        y = ys[i] + 0.5
+        text!(
+            "z = $z",
+            position = (x, y),
+            align = (:center, :center),
+            color = :grey,
+            textsize = 16,
+        )
+    end
     return f
 
 end
@@ -230,7 +283,7 @@ function get_colors()
     return colors
 end
 
-function plot_chains(chns, resolution=(1_000, 1200))
+function plot_chains(chns, resolution = (1_000, 1200))
 
     params = names(chns, :parameters)
 
@@ -256,7 +309,8 @@ function plot_chains(chns, resolution=(1_000, 1200))
 
     # right part of the plot // density
     for (i, param) in enumerate(params)
-        ax = Axis(fig[i, 2]; ylabel = string(param), limits = (nothing, nothing, 0, nothing))
+        ax =
+            Axis(fig[i, 2]; ylabel = string(param), limits = (nothing, nothing, 0, nothing))
         for chain = 1:n_chains
             values = chns[:, param, chain]
             density!(
@@ -279,3 +333,188 @@ function plot_chains(chns, resolution=(1_000, 1200))
     return fig
 
 end
+
+
+
+function get_df_C_Δr(df_Δ, m13_1_ch1)
+
+    idx = df_Δ.idx
+    Δr = df_Δ.idx.Δr
+
+    N_groups = length(levels(idx))
+    i_groups = 1:N_groups
+    Δr_mean = Float64[]
+    Δr_std = Float64[]
+    Δr_sdom = Float64[]
+    D_mean = Float64[]
+    D_std = Float64[]
+    D_sdom = Float64[]
+    for i_group in i_groups
+        Δr_group = Δr[i_group.==idx]
+        push!(Δr_mean, mean(Δr_group))
+        push!(Δr_std, std(Δr_group))
+        push!(Δr_sdom, sdom(Δr_group))
+
+        D_group = m13_1_ch1[:, i_group, 1]
+        push!(D_mean, mean(D_group))
+        push!(D_std, std(D_group))
+        push!(D_sdom, sdom(D_group))
+    end
+
+    df_C_Δr = DataFrame((; i_groups, Δr_mean, Δr_std, Δr_sdom, D_mean, D_std, D_sdom))
+    return df_C_Δr
+end
+
+
+
+function plot_df_C_Δr(df_C_Δr)
+
+    f = Figure()
+    ax = Axis(
+        f[1, 1],
+        xlabel = "Δr",
+        ylabel = "D",
+        title = input_dirs[type],
+        # limits = (0, nothing, 0, nothing),
+    )
+
+    errorbars!(ax, df_C_Δr.Δr_mean, df_C_Δr.D_mean, df_C_Δr.D_std, whiskerwidth = 10)
+    # errorbars!(ax, df_C_Δr.Δr_mean, df_C_Δr.D_mean, df_C_Δr.D_sdom, whiskerwidth = 10)
+    scatter!(ax, df_C_Δr.Δr_mean, df_C_Δr.D_mean, markersize = 7, color = :black)
+
+    # errorbars!(
+    #     ax,
+    #     df_C_Δr.Δr_mean,
+    #     df_C_Δr.D_mean,
+    #     df_C_Δr.Δr_sdom,
+    #     whiskerwidth = 10,
+    #     direction = :x,
+    # )
+
+    return f
+end
+
+
+#%%
+
+
+function get_log_likelihoods(df_Δ, df_model, f_loglik, model_name; forced)
+
+    filename = "likelihoods/$model_name.h5"
+
+    if isfile(filename) && !forced
+        println("Loading $filename")
+        llhs = h5open(filename, "r") do f
+            read(f, "llhs")
+        end
+        return llhs
+
+    else
+        println("Computing likelihoods, please wait.")
+        llhs = f_loglik(df_Δ, df_model)
+        println("Saving $filename")
+        h5open(filename, "w") do f
+            write(f, "llhs", llhs)
+        end
+
+        return llhs
+
+    end
+
+end
+
+
+function compute_log_likelihoods_independent(df_Δ, df_independent)
+    N_groups = length(levels(df_Δ.idx))
+    N = nrow(df_Δ)
+    M = nrow(df_independent)
+    llhs = zeros((N, M))
+    for i = 1:N
+        group = df_Δ.idx[i]
+        D_str = "D[$(group)]"
+        for j = 1:M
+            D = df_independent[j, D_str]
+            pdf = Rayleigh(D2σ²(D))
+            llhs[i, j] = logpdf(pdf, df_Δ[i, :Δr])
+        end
+    end
+    return llhs
+end
+
+
+function get_log_likelihoods_independent(df_Δ, df_independent, model_name; forced = false)
+    return get_log_likelihoods(
+        df_Δ,
+        df_independent,
+        compute_log_likelihoods_independent,
+        model_name;
+        forced = forced,
+    )
+end
+
+
+
+
+
+function compute_log_likelihoods_continuous(df_Δ, df_continuous)
+    N_groups = length(levels(df_Δ.idx))
+    N = nrow(df_Δ)
+    M = nrow(df_continuous)
+    llhs = zeros((N, M))
+    for i = 1:N
+        group = df_Δ.idx[i]
+        θ_str = "θ[$(group)]"
+        for j = 1:M
+            θ1 = df_continuous[j, θ_str]
+            w = [θ1, 1 - θ1]
+            D = df_continuous[j, ["D[1]", "D[2]"]]
+            dists = [Rayleigh(D2σ²(d)) for d in D]
+            pdf = MixtureModel(dists, w)
+            llhs[i, j] = logpdf(pdf, df_Δ[i, :Δr])
+        end
+    end
+    return llhs
+end
+
+
+function get_log_likelihoods_continuous(df_Δ, df_independent, model_name; forced = false)
+    return get_log_likelihoods(
+        df_Δ,
+        df_independent,
+        compute_log_likelihoods_continuous,
+        model_name;
+        forced = forced,
+    )
+end
+
+
+
+function compute_log_likelihoods_discrete(df_Δ, df_discrete)
+    N_groups = length(levels(df_Δ.idx))
+    N = nrow(df_Δ)
+    M = nrow(df_discrete)
+    llhs = zeros((N, M))
+    for i = 1:N
+        group = df_Δ.idx[i]
+        Z_str = "Z[$(group)]"
+        for j = 1:M
+            z = Int(df_discrete[j, Z_str])
+            D = df_discrete[j, "D[$(z)]"]
+            pdf = Rayleigh(D2σ²(D))
+            llhs[i, j] = logpdf(pdf, df_Δ[i, :Δr])
+        end
+    end
+    return llhs
+end
+
+
+function get_log_likelihoods_discrete(df_Δ, df_independent, model_name; forced = false)
+    return get_log_likelihoods(
+        df_Δ,
+        df_independent,
+        compute_log_likelihoods_discrete,
+        model_name;
+        forced = forced,
+    )
+end
+

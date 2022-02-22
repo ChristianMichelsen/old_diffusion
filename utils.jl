@@ -13,6 +13,7 @@ input_dirs = Dict(
     "Sir2DSir4D" => "Sir3-Halo-Sir2DSir4D_Judith_Cleaned",
 )
 
+
 function get_files(input_dir)
     return sort(
         filter(x -> occursin("Cell", x), readdir(input_dir, join = true)),
@@ -53,11 +54,14 @@ function df2dist(df::DataFrame)
 end
 
 
+
+# transform!(groupby(sales_df, [:year, :region]), eachindex => :store_id)
+
 function get_df_Δ(df::DataFrame)
     gd = groupby(df, [:cell, :id], sort = false)
 
     Δr = reduce(vcat, [group2dist(g) for g in gd])
-    idx = reduce(vcat, [fill(i, nrow(g)-1) for (i,g) in enumerate(gd)])
+    idx = reduce(vcat, [fill(i, nrow(g) - 1) for (i, g) in enumerate(gd)])
     id = reduce(vcat, [g[2:end, :id] for g in gd])
     cell = reduce(vcat, [g[2:end, :cell] for g in gd])
     return DataFrame((; Δr, idx, id, cell))
@@ -81,10 +85,10 @@ end
 
 
 
-function get_df_Δ_long_runs(dfs::DataFrame, df_Δ::DataFrame, min_L::Int=10)
+function get_df_Δ_long_runs(dfs::DataFrame, df_Δ::DataFrame; min_L::Int = 10)
 
-    df_by_group = get_df_rows(dfs);
-    df_long_runs = df_by_group[df_by_group.L.>min_L, :];
+    df_by_group = get_df_rows(dfs)
+    df_long_runs = df_by_group[df_by_group.L.>min_L, :]
 
     df_Δ_long_runs = vcat(
         [
@@ -97,9 +101,9 @@ function get_df_Δ_long_runs(dfs::DataFrame, df_Δ::DataFrame, min_L::Int=10)
 end
 
 
-function get_df_Δ_long_runs(dfs::DataFrame, min_L::Int=10)
+function get_df_Δ_long_runs(dfs::DataFrame; min_L::Int = 10)
     df_Δ = get_df_Δ(dfs)
-    return get_df_Δ_long_runs(dfs, df_Δ, min_L)
+    return get_df_Δ_long_runs(dfs, df_Δ, min_L = min_L)
 end
 
 
@@ -214,4 +218,27 @@ end
 
 function loglikelihood3(Δr, σ1, σ2, σ3, f1, f2)
     return sum(log.(likelihood3(Δr, σ1, σ2, σ3, f1, f2)))
+end
+
+
+function plot_color_groups(df_Δ)
+    color = mod.(df_Δ.idx, 7)
+
+    f = Figure(resolution = (2000, 500))
+    ax = Axis(
+        f[1, 1],
+        xlabel = "Index",
+        ylabel = "Δr",
+        title = input_dirs[type],
+        limits = (0, nothing, 0, nothing),
+    )
+    xs = 1:nrow(df_Δ)
+    scatter!(ax, df_Δ.Δr, color = color, colormap = :darktest)
+    return f
+end
+
+
+
+function sdom(x)
+    return std(x) / sqrt(length(x))
 end
