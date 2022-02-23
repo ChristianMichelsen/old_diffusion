@@ -30,10 +30,10 @@ function get_chains(
 
     if isfile(filename) && !forced
         println("Loading $filename")
-        chain = h5open(filename, "r") do f
+        chains = h5open(filename, "r") do f
             read(f, Chains)
         end
-        return sort(chain)
+        return sort(chains)
 
     else
         println("Running Bayesian Analysis, please wait.")
@@ -52,7 +52,7 @@ function get_chains(
             write(f, chains)
         end
 
-        return chains
+        return sort(chains)
 
     end
 
@@ -518,3 +518,58 @@ function get_log_likelihoods_discrete(df_Δ, df_independent, model_name; forced 
     )
 end
 
+
+
+#%%
+
+function get_variable_result(gen_quants, variable, N_samples, K, N_threads)
+    variable_result = zeros(N_samples, K, N_threads)
+    for thread = 1:N_threads
+        for (i, xi) in enumerate(gen_quants[:, thread])
+            variable_result[i, :, thread] = xi[variable]
+        end
+    end
+    return variable_result
+end
+
+
+function get_variable_chain(gen_quants, variable, N_samples, K, N_threads)
+    variable_result = get_variable_result(gen_quants, variable, N_samples, K, N_threads)
+    variable_names = [Symbol("$variable[$i]") for i = 1:K]
+    variable_chn = Chains(variable_result, variable_names)
+    return variable_chn
+end
+
+function get_variable_chain_merged(gen_quants, variables, N_samples, K, N_threads)
+    return hcat(
+        [
+            get_variable_chain(gen_quants, variable, N_samples, K, N_threads) for
+            variable in variables
+        ]...,
+    )
+end
+
+
+function merge_variables_into_chain(model::Turing.Model, chain_in::Chains)
+
+    chains_params = Turing.MCMCChains.get_sections(chain_in, :parameters)
+    gen_quants = generated_quantities(model, chains_params)
+
+    first_element = first(gen_quants)
+    variables = keys(first_element)
+    K = length(first_element[variables[1]]) # dimension
+
+    chns_generated =
+        get_variable_chain_merged(gen_quants, variables, N_samples, K, N_threads)
+    return hcat(chain_in, setrange(chns_generated, range(chain_in)))
+end
+
+
+function extract_variables(c::Chains, var::Union{Symbol, String})
+    return sort(c[namesingroup(c, var)])
+end
+
+function extract_variables(c::Chains, vars::Union{Vector{Symbol}, Vector{String}})
+    names = vcat([namesingroup(c, var) for var in vars]...)
+    return sort(c[names])
+end

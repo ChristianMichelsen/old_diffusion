@@ -107,16 +107,8 @@ println("2 coefficients, continuous")
 
 model_continuous = diffusion_continuous(df_Δ.Δr, df_Δ.idx);
 chains_continuous = get_chains(model_continuous, N_samples, name_continuous, N_threads)
-
 df_continuous = DataFrame(chains_continuous);
-plot_chains(chains_continuous[:, 1:24, :], (1000, 2000))
-if savefig
-    save(
-        "figures/chains__$(name_continuous).pdf",
-        plot_chains(chains_continuous[:, 1:24, :], (1000, 2000)),
-    )
-end
-
+plot_chains(chains_continuous[names(chains_continuous, :parameters)[1:12]], (1000, 2000))
 
 llhs_continuous = get_log_likelihoods_continuous(df_Δ, df_continuous, name_continuous);
 compute_lppd(llhs_continuous)
@@ -198,4 +190,12 @@ if savefig
 end
 
 #%%
+
+Ds = chains_continuous[namesingroup(chains_continuous, :D)]
+θs = chains_continuous[namesingroup(chains_continuous, :θ)]
+
+mask = DataFrame(mean(θs)).mean .> 0.8
+slow_groups = (1:N_groups)[mask]
+
+df_Δ_slow_groups = df_Δ[df_Δ.idx .∈ Ref(slow_groups), :]
 
