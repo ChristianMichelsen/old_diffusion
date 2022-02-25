@@ -89,22 +89,19 @@ function get_chain(model::Turing.Model, N_samples = 1000, N_threads = 1)
 end
 
 
-chn_ordered = get_chain(diffusion_ordered(data), N_samples, N_threads)
-chn_ordered_dirichlet = get_chain(diffusion_ordered_dirichlet(data), N_samples, N_threads)
-chn_ordered_Δw = get_chain(diffusion_ordered_Δw(data), N_samples, N_threads)
+chn_2D = get_chain(diffusion_ordered(data), N_samples, N_threads)
+chn_2D_dirichlet = get_chain(diffusion_ordered_dirichlet(data), N_samples, N_threads)
+chn_2D_Δw = get_chain(diffusion_ordered_Δw(data), N_samples, N_threads)
 
-plot(chn_ordered)
+plot(extract_variables(chn_2D, [:D, :w]))
 savefig("MWE_plot_ordered.png")
-plot(chn_ordered_dirichlet)
+plot(extract_variables(chn_2D_dirichlet, [:D, :w]))
 savefig("MWE_plot_ordered_dirichlet.png")
-plot(chn_ordered_Δw)
+plot(extract_variables(chn_2D_Δw, [:D, :w]))
 savefig("MWE_plot_ordered_Δw.png")
 
 
 #%%
-
-c[namesingroup(c, :D)]
-
 
 # loglikelihoods = pointwise_loglikelihoods(diffusion_ordered(data), Turing.MCMCChains.get_sections(chn_ordered, :parameters))
 

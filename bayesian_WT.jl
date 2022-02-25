@@ -98,7 +98,6 @@ pk_qualify(pk_independent)
         Θ1 = θ[i_group]
         w = [Θ1, 1 - Θ1]
         Δr[group_mask] ~ filldist(MixtureModel(dists, w), sum(group_mask))
-
     end
 end
 
@@ -115,6 +114,55 @@ compute_lppd(llhs_continuous)
 elpd_loo_continuous, loo_i_continuous, pk_continuous = psisloo(llhs_continuous');
 se_elpd_loo_continuous = std(loo_i_continuous) * sqrt(length(loo_i_continuous))
 pk_qualify(pk_continuous)
+
+
+#%%
+
+@model function diffusion_continuous_ordered(Δr, idx)
+    N_groups = length(levels(idx))
+
+    ΔD ~ filldist(Exponential(0.1), 2)
+    D = cumsum(ΔD)
+
+    dists = [Rayleigh(D2σ²(d)) for d in D]
+    θ ~ filldist(Uniform(0, 1), N_groups)
+
+    for i_group = 1:N_groups
+        group_mask = i_group .== idx
+        Θ1 = θ[i_group]
+        w = [Θ1, 1 - Θ1]
+        Δr[group_mask] ~ filldist(MixtureModel(dists, w), sum(group_mask))
+    end
+    return (; D)
+end
+
+# N_threads = 1
+name_continuous_ordered =
+    get_unique_name(N_samples, "continuous_ordered__$(min_L)__min_L", type, N_threads)
+println("2 coefficients, continuous ordered")
+
+model_continuous_ordered = diffusion_continuous_ordered(df_Δ.Δr, df_Δ.idx);
+chains_continuous_ordered =
+    get_chains(model_continuous_ordered, N_samples, name_continuous_ordered, N_threads)
+
+chains_continuous_ordered =
+    merge_variables_into_chain(model_continuous_ordered, chains_continuous_ordered)
+df_continuous_ordered = DataFrame(chains_continuous_ordered);
+
+
+plot_chains(
+    extract_variables(chains_continuous_ordered, [:D, :θ])[:, 1:12, :],
+    (1000, 2000),
+)
+
+llhs_continuous_ordered =
+    get_log_likelihoods_continuous(df_Δ, df_continuous_ordered, name_continuous_ordered);
+compute_lppd(llhs_continuous_ordered)
+elpd_loo_continuous_ordered, loo_i_continuous_ordered, pk_continuous_ordered =
+    psisloo(llhs_continuous_ordered');
+se_elpd_loo_continuous_ordered =
+    std(loo_i_continuous_ordered) * sqrt(length(loo_i_continuous_ordered))
+pk_qualify(pk_continuous_ordered)
 
 
 #%%
@@ -141,7 +189,6 @@ end
 name_discrete = get_unique_name(N_samples, "discrete__$(min_L)__min_L", type, N_threads)
 println("2 coefficients, discrete")
 
-
 model_discrete = diffusion_discrete(df_Δ.Δr, df_Δ.idx);
 
 chains_discrete = get_chains(
@@ -166,18 +213,17 @@ pk_qualify(pk_discrete)
 #%%
 
 
-#%%
-
-
 df_comparison = model_comparison(
     [
         llhs_independent,
         llhs_continuous,
+        llhs_continuous_ordered,
         llhs_discrete, #
     ],
     [
         "$(N_groups) coefficients, independent",
         "2 coefficients, continuous",
+        "2 coefficients, continuous ordered",
         "2 coefficients, discrete",
     ],
     #
@@ -191,11 +237,24 @@ end
 
 #%%
 
-Ds = chains_continuous[namesingroup(chains_continuous, :D)]
-θs = chains_continuous[namesingroup(chains_continuous, :θ)]
+Ds = extract_variables(chains_continuous_ordered, :D)
+θs = extract_variables(chains_continuous_ordered, :θ)
 
 mask = DataFrame(mean(θs)).mean .> 0.8
 slow_groups = (1:N_groups)[mask]
 
-df_Δ_slow_groups = df_Δ[df_Δ.idx .∈ Ref(slow_groups), :]
+df_Δ_slow_groups = df_Δ[df_Δ.idx.∈Ref(slow_groups), :]
 
+#%%
+
+loglikelihoods = pointwise_loglikelihoods(
+    model_continuous_ordered,
+    Turing.MCMCChains.get_sections(chains_continuous_ordered, :parameters),
+)
+
+param_mod_predict =
+    diffusion_continuous_ordered(similar(df_Δ.Δr, Missing), similar(df_Δ.idx, Missing),)
+ynames = string.(keys(loglikelihoods))
+loglikelihoods_vals = getindex.(Ref(loglikelihoods), ynames)
+# Reshape into `(nchains, nsamples, size(y)...)`
+loglikelihoods_arr = permutedims(cat(loglikelihoods_vals...; dims = 3), (2, 1, 3))

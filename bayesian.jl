@@ -76,7 +76,6 @@ if savefig
     save("figures/$(type)__chains_2D.pdf", fig_2D)
 end
 
-# %%
 
 
 @model function diffusion_3D(Δr)
