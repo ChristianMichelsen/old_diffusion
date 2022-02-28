@@ -477,11 +477,52 @@ function compute_log_likelihoods_continuous(df_Δ, df_continuous)
 end
 
 
-function get_log_likelihoods_continuous(df_Δ, df_independent, model_name; forced = false)
+function get_log_likelihoods_continuous(df_Δ, df_continuous, model_name; forced = false)
     return get_log_likelihoods(
         df_Δ,
-        df_independent,
+        df_continuous,
         compute_log_likelihoods_continuous,
+        model_name;
+        forced = forced,
+    )
+end
+
+
+
+function compute_log_likelihoods_continuous_3D(df_Δ, df_continuous_ordered_3D)
+    N_groups = length(levels(df_Δ.idx))
+    N = nrow(df_Δ)
+    M = nrow(df_continuous_ordered_3D)
+    llhs = zeros((N, M))
+    Ds = select(df_continuous_ordered_3D, r"D\[");
+
+    for i = 1:N
+        group = df_Δ.idx[i]
+        ws = select(df_continuous_ordered_3D, r"w\[")[:, group:N_groups:end]
+        for j = 1:M
+            D = Ds[j, :]
+            w = collect(ws[j, :])
+            dists = [Rayleigh(D2σ²(d)) for d in D]
+            pdf = MixtureModel(dists, w)
+            llhs[i, j] = logpdf(pdf, df_Δ[i, :Δr])
+        end
+    end
+    return llhs
+end
+
+
+
+
+function get_log_likelihoods_continuous_3D(
+    df_Δ,
+    df_continuous_ordered_3D,
+    model_name;
+    forced = false,
+)
+    return get_log_likelihoods(
+        df_Δ,
+        df_continuous_ordered_3D,
+        compute_log_likelihoods_continuous_3D,
         model_name;
         forced = forced,
     )
@@ -565,11 +606,11 @@ function merge_variables_into_chain(model::Turing.Model, chain_in::Chains)
 end
 
 
-function extract_variables(c::Chains, var::Union{Symbol, String})
+function extract_variables(c::Chains, var::Union{Symbol,String})
     return sort(c[namesingroup(c, var)])
 end
 
-function extract_variables(c::Chains, vars::Union{Vector{Symbol}, Vector{String}})
+function extract_variables(c::Chains, vars::Union{Vector{Symbol},Vector{String}})
     names = vcat([namesingroup(c, var) for var in vars]...)
     return sort(c[names])
 end

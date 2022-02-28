@@ -27,7 +27,7 @@ type = "WT"
 N_samples = 1_000;
 N_threads = 4
 min_L = 10
-# min_L = 100
+min_L = 100
 savefig = false
 # savefig = true
 
@@ -107,7 +107,7 @@ println("2 coefficients, continuous")
 model_continuous = diffusion_continuous(df_Δ.Δr, df_Δ.idx);
 chains_continuous = get_chains(model_continuous, N_samples, name_continuous, N_threads)
 df_continuous = DataFrame(chains_continuous);
-plot_chains(chains_continuous[names(chains_continuous, :parameters)[1:12]], (1000, 2000))
+plot_chains(extract_variables(chains_continuous, [:D, :θ])[:, 1:12, :], (1000, 2000))
 
 llhs_continuous = get_log_likelihoods_continuous(df_Δ, df_continuous, name_continuous);
 compute_lppd(llhs_continuous)
@@ -203,7 +203,7 @@ chains_discrete = get_chains(
 plot_chains(chains_discrete[:, 1:12, :], (1000, 2000))
 plot_chains(chains_discrete[100:end, 1:12, :], (1000, 2000))
 df_discrete = DataFrame(chains_discrete[100:end, :, :]);
-llhs_discrete = get_log_likelihoods_discrete(df_Δ, df_discrete, name_discrete)
+llhs_discrete = get_log_likelihoods_discrete(df_Δ, df_discrete, name_discrete);
 compute_lppd(llhs_discrete)
 elpd_loo_discrete, loo_i_discrete, pk_discrete = psisloo(llhs_discrete');
 se_elpd_loo_discrete = std(loo_i_discrete) * sqrt(length(loo_i_discrete))
@@ -213,17 +213,83 @@ pk_qualify(pk_discrete)
 #%%
 
 
+if false
+
+    @model function diffusion_continuous_ordered_3D(Δr, idx, K = 3)
+        N_groups = length(levels(idx))
+
+        ΔD ~ filldist(Exponential(0.1), K)
+        D = cumsum(ΔD)
+
+        dists = [Rayleigh(D2σ²(d)) for d in D]
+        w ~ filldist(Dirichlet(K, 1), N_groups)
+        # @show size(w)
+
+        for i_group = 1:N_groups
+            group_mask = i_group .== idx
+            wi = w[:, i_group]
+            # @show wi
+            Δr[group_mask] ~ filldist(MixtureModel(dists, wi), sum(group_mask))
+        end
+        return (; D)
+    end
+
+    # N_threads = 1
+    name_continuous_ordered_3D = get_unique_name(
+        N_samples,
+        "continuous_ordered_3D__$(min_L)__min_L",
+        type,
+        N_threads,
+    )
+    println("3 coefficients, continuous ordered")
+
+    model_continuous_ordered_3D = diffusion_continuous_ordered_3D(df_Δ.Δr, df_Δ.idx)
+    chains_continuous_ordered_3D = get_chains(
+        model_continuous_ordered_3D,
+        N_samples,
+        name_continuous_ordered_3D,
+        N_threads,
+    )
+
+    chains_continuous_ordered_3D = merge_variables_into_chain(
+        model_continuous_ordered_3D,
+        chains_continuous_ordered_3D,
+    )
+    df_continuous_ordered_3D = DataFrame(chains_continuous_ordered_3D)
+
+    plot_chains(extract_variables(chains_continuous_ordered_3D, [:ΔD]), (1000, 1000))
+
+
+    llhs_continuous_ordered_3D = get_log_likelihoods_continuous_3D(
+        df_Δ,
+        df_continuous_ordered_3D,
+        name_continuous_ordered_3D,
+    )
+    compute_lppd(llhs_continuous_ordered_3D)
+    elpd_loo_continuous_ordered_3D, loo_i_continuous_ordered_3D, pk_continuous_ordered_3D =
+        psisloo(llhs_continuous_ordered_3D')
+    se_elpd_loo_continuous_ordered_3D =
+        std(loo_i_continuous_ordered_3D) * sqrt(length(loo_i_continuous_ordered_3D))
+    pk_qualify(pk_continuous_ordered_3D)
+
+end
+
+#%%
+
+
 df_comparison = model_comparison(
     [
         llhs_independent,
         llhs_continuous,
         llhs_continuous_ordered,
+        # llhs_continuous_ordered_3D,
         llhs_discrete, #
     ],
     [
         "$(N_groups) coefficients, independent",
         "2 coefficients, continuous",
         "2 coefficients, continuous ordered",
+        # "3 coefficients, continuous ordered",
         "2 coefficients, discrete",
     ],
     #
@@ -247,14 +313,4 @@ df_Δ_slow_groups = df_Δ[df_Δ.idx.∈Ref(slow_groups), :]
 
 #%%
 
-loglikelihoods = pointwise_loglikelihoods(
-    model_continuous_ordered,
-    Turing.MCMCChains.get_sections(chains_continuous_ordered, :parameters),
-)
 
-param_mod_predict =
-    diffusion_continuous_ordered(similar(df_Δ.Δr, Missing), similar(df_Δ.idx, Missing),)
-ynames = string.(keys(loglikelihoods))
-loglikelihoods_vals = getindex.(Ref(loglikelihoods), ynames)
-# Reshape into `(nchains, nsamples, size(y)...)`
-loglikelihoods_arr = permutedims(cat(loglikelihoods_vals...; dims = 3), (2, 1, 3))
